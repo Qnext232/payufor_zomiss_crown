@@ -4,14 +4,14 @@ const crypto = require("crypto");
 
 // ---------------- CONFIG (edit here) ----------------
 const PORT = 5000;
-const KEY = "62OImf";
-const SALT = "2aY8oQFmHBfMCKgeVnWn25BxTIWrUSi6";
-const MODE = "test"; // "live" or "test"
+const KEY = "VxG1gd";
+const SALT = "rlIla3Gl6ZpypipOFEMpiB2JKG1BuxrR";
+const MODE = "live"; // "live" or "test"
 const PRODUCT = "ZomissCrownRegistration";
 const FEE = "1299.00"; // fixed on the server, client amount is ignored
 
 // Public URL of THIS backend (PayU posts the result here). Must be https + reachable by PayU.
-const BACKEND_URL = "http://localhost:5000";
+const BACKEND_URL = "https://payufor-zomiss-crown.vercel.app";
 // Where the React site runs (user is sent back here after payment)
 const FRONTEND_URL = "http://localhost:5173";
 // ----------------------------------------------------
