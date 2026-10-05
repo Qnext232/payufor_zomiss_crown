@@ -13,7 +13,7 @@ const FEE = "1.00"; // fixed on the server, client amount is ignored
 // Public URL of THIS backend (PayU posts the result here). Must be https + reachable by PayU.
 const BACKEND_URL = "https://payufor-zomiss-crown.vercel.app";
 // Where the React site runs (user is sent back here after payment)
-const FRONTEND_URL = "http://localhost:5173";
+const FRONTEND_URL = "https://zomisscrownweb.vercel.app/";
 // ----------------------------------------------------
 
 const PAYU_URL = MODE === "live" ? "https://secure.payu.in/_payment" : "https://test.payu.in/_payment";
