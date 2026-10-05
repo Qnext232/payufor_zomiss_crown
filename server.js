@@ -14,10 +14,10 @@ const FEE = "1.00"; // fixed on the server, client amount is ignored
 
 
 // Public URL of backend (PayU sends webhook/redirects here)
-const BACKEND_URL = (process.env.BACKEND_URL || "https://payufor-zomiss-crown.vercel.app").replace(/\/+$/, "");
+const BACKEND_URL = ("https://payufor-zomiss-crown.vercel.app").replace(/\/+$/, "");
 
 // Frontend URL (NO trailing slash - critical for CORS)
-const FRONTEND_URL = (process.env.FRONTEND_URL || "https://zomisscrownweb.vercel.app").replace(/\/+$/, "");
+const FRONTEND_URL = ("https://zomisscrownweb.vercel.app").replace(/\/+$/, "");
 // ----------------------------------------
 
 const PAYU_URL = MODE === "live" ? "https://secure.payu.in/_payment" : "https://test.payu.in/_payment";
