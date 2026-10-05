@@ -79,8 +79,8 @@ app.post("/api/payu/create-order", (req, res) => {
   const phone = String(mobile).replace(/\D/g, "");
   const name = String(fullName).trim();
 
-  if (name.length < 2 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail) \vert{}\vert{} !/^\d{10,15}$/.test(phone)) {
-    return res.status(400).json({ success: false, message: "Valid name, email and mobile are required." });
+if (name.length < 2 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail) || !/^\d{10,15}$/.test(phone)) {
+  return res.status(400).json({ success: false, message: "Valid name, email and mobile are required." });
   }
 
   const txnid = "ZCI" + Date.now() + crypto.randomBytes(4).toString("hex").toUpperCase();
