@@ -8,7 +8,7 @@ const KEY = "VxG1gd";
 const SALT = "rlIla3Gl6ZpypipOFEMpiB2JKG1BuxrR";
 const MODE = "live"; // "live" or "test"
 const PRODUCT = "ZomissCrownRegistration";
-const FEE = "1299.00"; // fixed on the server, client amount is ignored
+const FEE = "1.00"; // fixed on the server, client amount is ignored
 
 // Public URL of THIS backend (PayU posts the result here). Must be https + reachable by PayU.
 const BACKEND_URL = "https://payufor-zomiss-crown.vercel.app";
