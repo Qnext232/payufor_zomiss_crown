@@ -25,7 +25,31 @@ const orders = new Map();
 const registrations = [];
 
 const app = express();
-app.use(cors({ origin: FRONTEND_URL }));
+const allowedOrigins = [
+  "http://localhost:5173",
+  "https://zomisscrownweb.vercel.app"
+];
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // Allow requests with no origin (like mobile apps, curl, or server-to-server)
+      if (!origin) return callback(null, true);
+      
+      const cleanOrigin = origin.replace(/\/+$/, "");
+      if (allowedOrigins.includes(cleanOrigin)) {
+        return callback(null, true);
+      }
+      return callback(new Error("Blocked by CORS"));
+    },
+    credentials: true,
+    methods: ["GET", "POST", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"]
+  })
+);
+
+// Ensure OPTIONS preflight requests are responded to immediately
+app.options("*", cors());
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true }));
 
