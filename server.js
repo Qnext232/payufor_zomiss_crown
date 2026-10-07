@@ -2,7 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const crypto = require("crypto");
 
-// ---------------- CONFIG (edit here) ----------------
+// ---------------- CONFIG ----------------
 const PORT = 5000;
 const KEY = "VxG1gd";
 const SALT = "rlIla3Gl6ZpypipOFEMpiB2JKG1BuxrR";
@@ -12,13 +12,12 @@ const DEFAULT_PRODUCT = "CelebsKey";
 // Public URL of backend (PayU sends webhook/redirects here)
 const BACKEND_URL = ("https://payufor-zomiss-crown.vercel.app").replace(/\/+$/, "");
 
-// Frontend URL (NO trailing slash - critical for CORS)
-const FRONTEND_URL = ("https://zomisscrownweb.vercel.app").replace(/\/+$/, "");
+// Fallback frontend URL (only used if website does not provide redirectUrl)
+const DEFAULT_FRONTEND_URL = ("https://zomisscrownweb.vercel.app").replace(/\/+$/, "");
 // ----------------------------------------
 
 const PAYU_URL = MODE === "live" ? "https://secure.payu.in/_payment" : "https://test.payu.in/_payment";
 const sha512 = (s) => crypto.createHash("sha512").update(s, "utf8").digest("hex");
-const back = (q) => `${FRONTEND_URL}/registration?${new URLSearchParams(q)}`;
 
 // In-memory fallback (Note: for zero transaction drops across cold starts, connect Redis/DB)
 const orders = new Map();
@@ -26,20 +25,14 @@ const registrations = [];
 
 const app = express();
 
-const allowedOrigins = [
-  "http://localhost:5173",
-  "https://zomisscrownweb.vercel.app"
-];
-
-// Manual Preflight & Header Guard
+// Flexible CORS support allowing local dev and any production website domain
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  const cleanOrigin = origin ? origin.replace(/\/+$/, "") : "";
-
-  if (allowedOrigins.includes(cleanOrigin) || !origin) {
-    res.setHeader("Access-Control-Allow-Origin", origin || "*");
+  if (origin) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+  } else {
+    res.setHeader("Access-Control-Allow-Origin", "*");
   }
-
   res.setHeader("Access-Control-Allow-Credentials", "true");
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Requested-With");
@@ -50,17 +43,9 @@ app.use((req, res, next) => {
   next();
 });
 
-// Express CORS middleware
 app.use(
   cors({
-    origin: (origin, callback) => {
-      if (!origin) return callback(null, true);
-      const cleanOrigin = origin.replace(/\/+$/, "");
-      if (allowedOrigins.includes(cleanOrigin)) {
-        return callback(null, true);
-      }
-      return callback(null, false);
-    },
+    origin: true,
     credentials: true,
   })
 );
@@ -68,9 +53,20 @@ app.use(
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-// Create a signed PayU order with dynamic fee/amount sent from the website
+// Create a signed PayU order with dynamic fee & redirectUrl sent by the website
 app.post("/api/payu/create-order", (req, res) => {
-  const { fullName = "", email = "", mobile = "", amount, fee, productinfo } = req.body;
+  const {
+    fullName = "",
+    email = "",
+    mobile = "",
+    amount,
+    fee,
+    productinfo,
+    redirectUrl,
+    returnUrl,
+    frontendUrl
+  } = req.body;
+
   const cleanEmail = String(email).trim().toLowerCase();
   const phone = String(mobile).replace(/\D/g, "");
   const name = String(fullName).trim();
@@ -80,7 +76,7 @@ app.post("/api/payu/create-order", (req, res) => {
     return res.status(400).json({ success: false, message: "Valid name, email and mobile are required." });
   }
 
-  // Validate dynamic amount sent from website
+  // Validate dynamic fee/amount received from website
   const rawAmount = amount !== undefined && amount !== null ? amount : fee;
   const parsedAmount = parseFloat(rawAmount);
 
@@ -88,17 +84,28 @@ app.post("/api/payu/create-order", (req, res) => {
     return res.status(400).json({ success: false, message: "A valid positive payment amount is required." });
   }
 
-  // Format amount to standard 2 decimal places (e.g. "2499.00")
   const orderAmount = Number(parsedAmount).toFixed(2);
   const product = String(productinfo || DEFAULT_PRODUCT).trim();
 
+  // Dynamic redirect URL sent from website (e.g. "http://localhost:5173/registration" or "https://yourdomain.com/registration")
+  const clientRedirect = String(redirectUrl || returnUrl || (frontendUrl ? `${frontendUrl}/registration` : "") || `${DEFAULT_FRONTEND_URL}/registration`).trim();
+
   const txnid = "ZCI" + Date.now() + crypto.randomBytes(4).toString("hex").toUpperCase();
   const firstname = name.split(/\s+/)[0].replace(/[^a-zA-Z0-9]/g, "") || "Attendee";
-  
-  // Calculate PayU SHA-512 hash using the dynamic amount sent from website
+
+  // Calculate PayU SHA-512 hash using the dynamic amount sent from the website
   const hash = sha512(`${KEY}|${txnid}|${orderAmount}|${product}|${firstname}|${cleanEmail}|||||||||||${SALT}`);
 
-  orders.set(txnid, { txnid, amount: orderAmount, email: cleanEmail, status: "PENDING" });
+  // Attach clientRedirect URL query to the PayU callback URL so it survives serverless restarts
+  const serverCallbackUrl = `${BACKEND_URL}/api/payu/response?redirectUrl=${encodeURIComponent(clientRedirect)}`;
+
+  orders.set(txnid, {
+    txnid,
+    amount: orderAmount,
+    email: cleanEmail,
+    redirectUrl: clientRedirect,
+    status: "PENDING"
+  });
 
   res.json({
     success: true,
@@ -112,18 +119,24 @@ app.post("/api/payu/create-order", (req, res) => {
       email: cleanEmail,
       phone,
       hash,
-      surl: `${BACKEND_URL}/api/payu/response`,
-      furl: `${BACKEND_URL}/api/payu/response`,
+      surl: serverCallbackUrl,
+      furl: serverCallbackUrl,
     },
   });
 });
 
-// PayU callback -> verify hash -> redirect to React app
+// PayU callback -> verify hash -> redirect browser back to the website URL sent by the client
 app.post("/api/payu/response", (req, res) => {
   const b = req.body;
   const order = orders.get(b.txnid);
 
-  // In serverless, if the instance restarted and lost in-memory state, verify via hash & amount fallback
+  // Read target redirect URL sent by website (from callback query or order store)
+  const targetRedirect = req.query.redirectUrl || order?.redirectUrl || `${DEFAULT_FRONTEND_URL}/registration`;
+  const redirectTarget = (q) => {
+    const sep = targetRedirect.includes("?") ? "&" : "?";
+    return `${targetRedirect}${sep}${new URLSearchParams(q)}`;
+  };
+
   const udf = [10, 9, 8, 7, 6, 5, 4, 3, 2, 1].map((i) => b["udf" + i] || "");
   const expected = sha512(
     [SALT, b.status || "", ...udf, b.email || "", b.firstname || "", b.productinfo || "", b.amount || "", b.txnid, b.key || ""].join("|")
@@ -133,12 +146,12 @@ app.post("/api/payu/response", (req, res) => {
 
   if (!hashValid) {
     if (order) order.status = "VERIFICATION_FAILED";
-    return res.redirect(back({ status: "failure", msg: "Payment verification failed." }));
+    return res.redirect(redirectTarget({ status: "failure", msg: "Payment verification failed." }));
   }
 
   if (b.status !== "success") {
     if (order) order.status = "FAILURE";
-    return res.redirect(back({ status: "failure", txnid: b.txnid, msg: b.error_Message || "Payment failed" }));
+    return res.redirect(redirectTarget({ status: "failure", txnid: b.txnid, msg: b.error_Message || "Payment failed" }));
   }
 
   // Record verified order
@@ -148,9 +161,15 @@ app.post("/api/payu/response", (req, res) => {
     email: String(b.email).toLowerCase(),
     status: "SUCCESS",
     mihpayid: b.mihpayid || "",
+    redirectUrl: targetRedirect,
   });
 
-  return res.redirect(back({ status: "success", txnid: b.txnid, payuMoneyId: b.mihpayid || "", amount: b.amount }));
+  return res.redirect(redirectTarget({
+    status: "success",
+    txnid: b.txnid,
+    payuMoneyId: b.mihpayid || "",
+    amount: b.amount
+  }));
 });
 
 // Save registration (only for a verified payment, once per payment)
