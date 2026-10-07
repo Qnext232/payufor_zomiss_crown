@@ -7,11 +7,7 @@ const PORT = 5000;
 const KEY = "VxG1gd";
 const SALT = "rlIla3Gl6ZpypipOFEMpiB2JKG1BuxrR";
 const MODE = "live"; // "live" or "test"
-const PRODUCT = "ZomissCrownRegistration";
-const FEE = "1299.00"; // fixed on the server, client amount is ignored
-
-
-
+const DEFAULT_PRODUCT = "CelebsKey";
 
 // Public URL of backend (PayU sends webhook/redirects here)
 const BACKEND_URL = ("https://payufor-zomiss-crown.vercel.app").replace(/\/+$/, "");
@@ -40,8 +36,8 @@ app.use((req, res, next) => {
   const origin = req.headers.origin;
   const cleanOrigin = origin ? origin.replace(/\/+$/, "") : "";
 
-  if (allowedOrigins.includes(cleanOrigin)) {
-    res.setHeader("Access-Control-Allow-Origin", origin);
+  if (allowedOrigins.includes(cleanOrigin) || !origin) {
+    res.setHeader("Access-Control-Allow-Origin", origin || "*");
   }
 
   res.setHeader("Access-Control-Allow-Credentials", "true");
@@ -72,22 +68,37 @@ app.use(
 app.use(express.json({ limit: "2mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-// Create a signed PayU order
+// Create a signed PayU order with dynamic fee/amount sent from the website
 app.post("/api/payu/create-order", (req, res) => {
-  const { fullName = "", email = "", mobile = "" } = req.body;
+  const { fullName = "", email = "", mobile = "", amount, fee, productinfo } = req.body;
   const cleanEmail = String(email).trim().toLowerCase();
   const phone = String(mobile).replace(/\D/g, "");
   const name = String(fullName).trim();
 
-if (name.length < 2 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail) || !/^\d{10,15}$/.test(phone)) {
-  return res.status(400).json({ success: false, message: "Valid name, email and mobile are required." });
+  // Validate attendee info
+  if (name.length < 2 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail) || !/^\d{10,15}$/.test(phone)) {
+    return res.status(400).json({ success: false, message: "Valid name, email and mobile are required." });
   }
 
-  const txnid = "ZCI" + Date.now() + crypto.randomBytes(4).toString("hex").toUpperCase();
-  const firstname = name.split(/\s+/)[0].replace(/[^a-zA-Z0-9]/g, "") || "Candidate";
-  const hash = sha512(`${KEY}|${txnid}|${FEE}|${PRODUCT}|${firstname}|${cleanEmail}|||||||||||${SALT}`);
+  // Validate dynamic amount sent from website
+  const rawAmount = amount !== undefined && amount !== null ? amount : fee;
+  const parsedAmount = parseFloat(rawAmount);
 
-  orders.set(txnid, { txnid, amount: FEE, email: cleanEmail, status: "PENDING" });
+  if (isNaN(parsedAmount) || parsedAmount <= 0) {
+    return res.status(400).json({ success: false, message: "A valid positive payment amount is required." });
+  }
+
+  // Format amount to standard 2 decimal places (e.g. "2499.00")
+  const orderAmount = Number(parsedAmount).toFixed(2);
+  const product = String(productinfo || DEFAULT_PRODUCT).trim();
+
+  const txnid = "ZCI" + Date.now() + crypto.randomBytes(4).toString("hex").toUpperCase();
+  const firstname = name.split(/\s+/)[0].replace(/[^a-zA-Z0-9]/g, "") || "Attendee";
+  
+  // Calculate PayU SHA-512 hash using the dynamic amount sent from website
+  const hash = sha512(`${KEY}|${txnid}|${orderAmount}|${product}|${firstname}|${cleanEmail}|||||||||||${SALT}`);
+
+  orders.set(txnid, { txnid, amount: orderAmount, email: cleanEmail, status: "PENDING" });
 
   res.json({
     success: true,
@@ -95,8 +106,8 @@ if (name.length < 2 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail) || !/^\d{1
     params: {
       key: KEY,
       txnid,
-      amount: FEE,
-      productinfo: PRODUCT,
+      amount: orderAmount,
+      productinfo: product,
       firstname,
       email: cleanEmail,
       phone,
@@ -150,7 +161,7 @@ app.post("/api/registration/submit", (req, res) => {
   if (!order || order.status !== "SUCCESS") {
     return res.status(400).json({ success: false, message: "Payment has not been verified." });
   }
-  if (!d.pass?.regId || !d.section1?.fullName) {
+  if (!d.pass?.regId && !d.txnid) {
     return res.status(400).json({ success: false, message: "Registration details are incomplete." });
   }
   if (registrations.some((r) => r.payment?.txnid === order.txnid)) {
@@ -163,7 +174,7 @@ app.post("/api/registration/submit", (req, res) => {
     submittedAt: new Date().toISOString(),
   });
 
-  res.json({ success: true, regId: d.pass.regId });
+  res.json({ success: true, txnid: order.txnid });
 });
 
 app.get("/api/health", (_, res) => res.json({ success: true, mode: MODE }));
